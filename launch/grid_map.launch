@@ -1,29 +1,23 @@
 <launch>
 
 <node pkg="plan_env" name="gridmap_node" type="gridmap_node" output="screen">
+    <param name="grid_map/resolution"      value="0.2" /> 
+    <param name="grid_map/map_size_x"   value="400" /> 
+    <param name="grid_map/map_size_y"   value="400" /> 
+    <param name="grid_map/map_size_z"   value="10" /> 
 
-    <remap from="~grid_map/odom" to="/vins_estimator/imu_propagate"/>
-    <remap from="~grid_map/cloud" to="nouse2"/>
-    <remap from="~grid_map/pose"   to = "nouse1"/> 
-    <remap from="~grid_map/depth" to = "/camera/aligned_depth_to_color/image_raw"/>
-
-    <param name="grid_map/resolution"      value="0.1" /> 
-    <param name="grid_map/map_size_x"   value="50" /> 
-    <param name="grid_map/map_size_y"   value="50" /> 
-    <param name="grid_map/map_size_z"   value="3.0" /> 
-
-    <param name="grid_map/local_update_range_x"  value="5.5" /> 
-    <param name="grid_map/local_update_range_y"  value="5.5" /> 
-    <param name="grid_map/local_update_range_z"  value="4.5" /> 
+    <param name="grid_map/local_update_range_x"  value="10" /> 
+    <param name="grid_map/local_update_range_y"  value="10" /> 
+    <param name="grid_map/local_update_range_z"  value="10" /> 
     <param name="grid_map/obstacles_inflation"     value="0.1" /> 
     <param name="grid_map/local_map_margin" value="10"/>
     <param name="grid_map/ground_height"        value="-0.01"/>
     <!-- camera parameter -->
 
-    <param name="grid_map/cx" value="320.20697021484375"/>
-    <param name="grid_map/cy" value="174.2457275390625"/>
-    <param name="grid_map/fx" value="262.0365905761719"/>
-    <param name="grid_map/fy" value="262.0365905761719"/>
+    <param name="grid_map/cx" value="320.2084655761719"/>
+    <param name="grid_map/cy" value="174.24594116210938"/>
+    <param name="grid_map/fx" value="262.0037536621094"/>
+    <param name="grid_map/fy" value="262.0037536621094"/>
     
     <!-- depth filter -->
     <param name="grid_map/use_depth_filter" value="true"/>
@@ -40,7 +34,7 @@
     <param name="grid_map/p_max"  value="0.90"/>
     <param name="grid_map/p_occ"  value="0.80"/>
     <param name="grid_map/min_ray_length" value="0.3"/>
-    <param name="grid_map/max_ray_length" value="5.0"/>
+    <param name="grid_map/max_ray_length" value="10.0"/>
 
     <param name="grid_map/visualization_truncate_height"   value="1.8"/>
     <param name="grid_map/show_occ_time"  value="false"/>
