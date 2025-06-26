@@ -6,41 +6,43 @@ void GridMap::initMap(ros::NodeHandle &nh)
 
   /* get parameter */
   // double x_size, y_size, z_size;
-  node_.param("grid_map/pose_type", mp_.pose_type_, 1);
-  node_.param("grid_map/frame_id", mp_.frame_id_, string("world"));
-  node_.param("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_, 1.0);
+  node_.param("grid_map/pose_type", mp_.pose_type_, 1); // 姿态类型
+  node_.param("grid_map/frame_id", mp_.frame_id_, string("world")); // 地图坐标系
+  node_.param("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_, 1.0); // 数据超时时间
 
-  node_.param("grid_map/resolution", mp_.resolution_, -1.0);
+  node_.param("grid_map/resolution", mp_.resolution_, -1.0); // 网格分辨率
+  // 局部更新范围
   node_.param("grid_map/local_update_range_x", mp_.local_update_range3d_(0), -1.0);
   node_.param("grid_map/local_update_range_y", mp_.local_update_range3d_(1), -1.0);
   node_.param("grid_map/local_update_range_z", mp_.local_update_range3d_(2), -1.0);
-  node_.param("grid_map/obstacles_inflation", mp_.obstacles_inflation_, -1.0);
-  node_.param("grid_map/enable_virtual_wall", mp_.enable_virtual_walll_, false);
-  node_.param("grid_map/virtual_ceil", mp_.virtual_ceil_, -1.0);
-  node_.param("grid_map/virtual_ground", mp_.virtual_ground_, -1.0);
-
+  node_.param("grid_map/obstacles_inflation", mp_.obstacles_inflation_, -1.0); // 障碍物膨胀半径
+  node_.param("grid_map/enable_virtual_wall", mp_.enable_virtual_walll_, false); // 启用虚拟墙
+  node_.param("grid_map/virtual_ceil", mp_.virtual_ceil_, -1.0); // 虚拟天花板高度
+  node_.param("grid_map/virtual_ground", mp_.virtual_ground_, -1.0); // 虚拟地面高度
+  // 相机内参
   node_.param("grid_map/fx", mp_.fx_, -1.0);
   node_.param("grid_map/fy", mp_.fy_, -1.0);
   node_.param("grid_map/cx", mp_.cx_, -1.0);
   node_.param("grid_map/cy", mp_.cy_, -1.0);
-
+  // 深度滤波配置
   node_.param("grid_map/use_depth_filter", mp_.use_depth_filter_, true);
   node_.param("grid_map/depth_filter_tolerance", mp_.depth_filter_tolerance_, -1.0);
   node_.param("grid_map/depth_filter_mindist", mp_.depth_filter_mindist_, 0.1);
   node_.param("grid_map/depth_filter_margin", mp_.depth_filter_margin_, -1);
   node_.param("grid_map/k_depth_scaling_factor", mp_.k_depth_scaling_factor_, -1.0);
   node_.param("grid_map/skip_pixel", mp_.skip_pixel_, -1);
+  // 占据概率相关参数
+  node_.param("grid_map/p_hit", mp_.p_hit_, 0.70);    // 检测到障碍物的概率
+  node_.param("grid_map/p_miss", mp_.p_miss_, 0.35);  // 未检测到障碍物的概率
+  node_.param("grid_map/p_min", mp_.p_min_, 0.12);    // 最小占据概率
+  node_.param("grid_map/p_max", mp_.p_max_, 0.97);    // 最大占据概率
+  node_.param("grid_map/p_occ", mp_.p_occ_, 0.80);    // 占据阈值概率
+  node_.param("grid_map/fading_time", mp_.fading_time_, 1000.0);  // 占据概率衰减时间
+  node_.param("grid_map/min_ray_length", mp_.min_ray_length_, 0.1); // 最小射线长度
 
-  node_.param("grid_map/p_hit", mp_.p_hit_, 0.70);
-  node_.param("grid_map/p_miss", mp_.p_miss_, 0.35);
-  node_.param("grid_map/p_min", mp_.p_min_, 0.12);
-  node_.param("grid_map/p_max", mp_.p_max_, 0.97);
-  node_.param("grid_map/p_occ", mp_.p_occ_, 0.80);
-  node_.param("grid_map/fading_time", mp_.fading_time_, 1000.0);
-  node_.param("grid_map/min_ray_length", mp_.min_ray_length_, 0.1);
+  node_.param("grid_map/show_occ_time", mp_.show_occ_time_, false); // 显示计算时间
 
-  node_.param("grid_map/show_occ_time", mp_.show_occ_time_, false);
-
+  // 计算障碍物膨胀的网格数，限制最大膨胀值
   mp_.inf_grid_ = ceil((mp_.obstacles_inflation_ - 1e-5) / mp_.resolution_);
   if (mp_.inf_grid_ > 4)
   {
@@ -49,59 +51,67 @@ void GridMap::initMap(ros::NodeHandle &nh)
     ROS_WARN("Inflation is too big, which will cause siginificant computation! Resolution enalrged to %f automatically.", mp_.resolution_);
   }
 
+  // 计算辅助参数
   mp_.resolution_inv_ = 1 / mp_.resolution_;
+  // 将3D更新范围从米转换为网格数
   mp_.local_update_range3i_ = (mp_.local_update_range3d_ * mp_.resolution_inv_).array().ceil().cast<int>();
   mp_.local_update_range3d_ = mp_.local_update_range3i_.array().cast<double>() * mp_.resolution_;
+  // 环形缓冲区大小（包含膨胀区域）
   md_.ringbuffer_size3i_ = 2 * mp_.local_update_range3i_;
   md_.ringbuffer_inf_size3i_ = md_.ringbuffer_size3i_ + Eigen::Vector3i(2 * mp_.inf_grid_, 2 * mp_.inf_grid_, 2 * mp_.inf_grid_);
 
+  // 计算概率的对数表示（Log-odds变换）
   mp_.prob_hit_log_ = logit(mp_.p_hit_);
   mp_.prob_miss_log_ = logit(mp_.p_miss_);
   mp_.clamp_min_log_ = logit(mp_.p_min_);
   mp_.clamp_max_log_ = logit(mp_.p_max_);
   mp_.min_occupancy_log_ = logit(mp_.p_occ_);
 
+  // 输出调试信息
   cout << "hit: " << mp_.prob_hit_log_ << endl;
   cout << "miss: " << mp_.prob_miss_log_ << endl;
   cout << "min log: " << mp_.clamp_min_log_ << endl;
   cout << "max: " << mp_.clamp_max_log_ << endl;
   cout << "thresh log: " << mp_.min_occupancy_log_ << endl;
 
-  // initialize data buffers
+  // 初始化数据缓冲区
   Eigen::Vector3i map_voxel_num3i = 2 * mp_.local_update_range3i_;
   int buffer_size = map_voxel_num3i(0) * map_voxel_num3i(1) * map_voxel_num3i(2);
   int buffer_inf_size = (map_voxel_num3i(0) + 2 * mp_.inf_grid_) * (map_voxel_num3i(1) + 2 * mp_.inf_grid_) * (map_voxel_num3i(2) + 2 * mp_.inf_grid_);
   md_.ringbuffer_origin3i_ = Eigen::Vector3i(0, 0, 0);
   md_.ringbuffer_inf_origin3i_ = Eigen::Vector3i(0, 0, 0);
-
+  // 初始化占据概率缓冲区(对数表示)
   md_.occupancy_buffer_ = vector<double>(buffer_size, mp_.clamp_min_log_);
+  // 初始化膨胀后的占据缓冲区(用于碰撞检测)
   md_.occupancy_buffer_inflate_ = vector<uint16_t>(buffer_inf_size, 0);
-
+  // 初始化统计计数器和标志位
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
   md_.flag_rayend_ = vector<char>(buffer_size, -1);
   md_.flag_traverse_ = vector<char>(buffer_size, -1);
   md_.cache_voxel_ = vector<Eigen::Vector3i>(buffer_size, Eigen::Vector3i(0, 0, 0));
-
+  // 初始化计数器
   md_.raycast_num_ = 0;
   md_.proj_points_cnt_ = 0;
   md_.cache_voxel_cnt_ = 0;
-
+  // 相机到机器人本体的外参矩阵(固定变换)
   md_.cam2body_ << 0.0, 0.0, 1.0, 0.0,
       -1.0, 0.0, 0.0, 0.0,
       0.0, -1.0, 0.0, 0.0,
       0.0, 0.0, 0.0, 1.0;
 
-  /* init callback */
+  /* init callback */ /* 初始化订阅者和回调函数 */
+  // 深度图像订阅
   depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/zed2/zed_node/depth/depth_registered", 50));
+  // 外参订阅(相机到本体的变换)
   extrinsic_sub_ = node_.subscribe<nav_msgs::Odometry>(
       "/vins_estimator/extrinsic", 10, &GridMap::extrinsicCallback, this); //sub
-
+  // 根据姿态类型选择不同的订阅方式
   if (mp_.pose_type_ == POSE_STAMPED)
   {
     pose_sub_.reset(
         new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "grid_map/pose", 25));
-
+    // 同步深度图像和姿态消息
     sync_image_pose_.reset(new message_filters::Synchronizer<SyncPolicyImagePose>(
         SyncPolicyImagePose(100), *depth_sub_, *pose_sub_));
     sync_image_pose_->registerCallback(boost::bind(&GridMap::depthPoseCallback, this, _1, _2));
@@ -109,26 +119,28 @@ void GridMap::initMap(ros::NodeHandle &nh)
   else if (mp_.pose_type_ == ODOMETRY)
   {
     odom_sub_.reset(new message_filters::Subscriber<nav_msgs::Odometry>(node_, "/vins_estimator/imu_propagate", 100, ros::TransportHints().tcpNoDelay()));
-
+    // 同步深度图像和里程计消息
     sync_image_odom_.reset(new message_filters::Synchronizer<SyncPolicyImageOdom>(
         SyncPolicyImageOdom(100), *depth_sub_, *odom_sub_));
     sync_image_odom_->registerCallback(boost::bind(&GridMap::depthOdomCallback, this, _1, _2));
   }
 
   // use odometry and point cloud
+  // 独立的里程计和点云订阅(备用数据源)
   indep_odom_sub_ =
       node_.subscribe<nav_msgs::Odometry>("grid_map/odom", 10, &GridMap::odomCallback, this);
   indep_cloud_sub_ =
       node_.subscribe<sensor_msgs::PointCloud2>("grid_map/cloud", 10, &GridMap::cloudCallback, this);
 
-  occ_timer_ = node_.createTimer(ros::Duration(0.032), &GridMap::updateOccupancyCallback, this);
-  vis_timer_ = node_.createTimer(ros::Duration(0.125), &GridMap::visCallback, this);
+  occ_timer_ = node_.createTimer(ros::Duration(0.032), &GridMap::updateOccupancyCallback, this); // 地图更新定时器(31.25Hz)
+  vis_timer_ = node_.createTimer(ros::Duration(0.125), &GridMap::visCallback, this); // 可视化定时器(8Hz)
   if (mp_.fading_time_ > 0)
-    fading_timer_ = node_.createTimer(ros::Duration(0.5), &GridMap::fadingCallback, this);
+    fading_timer_ = node_.createTimer(ros::Duration(0.5), &GridMap::fadingCallback, this); // 占据概率衰减定时器(2Hz)
 
-  map_pub_ = node_.advertise<sensor_msgs::PointCloud2>("grid_map/occupancy", 10);
-  map_inf_pub_ = node_.advertise<sensor_msgs::PointCloud2>("grid_map/occupancy_inflate", 10);
+  map_pub_ = node_.advertise<sensor_msgs::PointCloud2>("grid_map/occupancy", 10);   // 原始占据地图发布
+  map_inf_pub_ = node_.advertise<sensor_msgs::PointCloud2>("grid_map/occupancy_inflate", 10);  // 膨胀后地图发布
 
+  // 初始化标志位
   md_.occ_need_update_ = false;
   md_.has_first_depth_ = false;
   md_.has_odom_ = false;
@@ -137,30 +149,31 @@ void GridMap::initMap(ros::NodeHandle &nh)
   md_.flag_have_ever_received_depth_ = false;
   md_.flag_depth_odom_timeout_ = false;
 }
-
+// 地图占据状态更新回调函数（定时调用）
 void GridMap::updateOccupancyCallback(const ros::TimerEvent & /*event*/)
 {
   if (!checkDepthOdomNeedupdate())
     return;
 
-  /* update occupancy */
+  /* update occupancy */ // 更新占据状态
   ros::Time t1, t2, t3, t4, t5;
   t1 = ros::Time::now();
-
+  // 移动环形缓冲区（实现动态窗口更新）
   moveRingBuffer();
   t2 = ros::Time::now();
-
+  // 将深度图像投影到3D空间
   projectDepthImage();
   t3 = ros::Time::now();
 
   if (md_.proj_points_cnt_ > 0)
   {
+    // 执行射线投射处理
     raycastProcess();
     t4 = ros::Time::now();
-
+    // 清除旧数据并膨胀障碍物
     clearAndInflateLocalMap();
     t5 = ros::Time::now();
-
+    // 显示性能统计信息
     if (mp_.show_occ_time_)
     {
       cout << setprecision(7);
@@ -184,35 +197,40 @@ void GridMap::updateOccupancyCallback(const ros::TimerEvent & /*event*/)
 
   md_.occ_need_update_ = false;
 }
-
+// 地图可视化回调函数
 void GridMap::visCallback(const ros::TimerEvent & /*event*/)
 {
   if (!mp_.have_initialized_)
     return;
 
   ros::Time t0 = ros::Time::now();
+  // 发布膨胀后的地图
   publishMapInflate();
+  // 发布原始地图
   publishMap();
   ros::Time t1 = ros::Time::now();
-
+  // 显示可视化耗时
   if (mp_.show_occ_time_)
   {
     printf("Visualization(ms):%f\n", (t1 - t0).toSec() * 1000);
   }
 }
-
+// 占据概率衰减回调函数(实现障碍物消失机制)
 void GridMap::fadingCallback(const ros::TimerEvent & /*event*/)
 {
+  // 计算每次衰减的步长
   const double reduce = (mp_.clamp_max_log_ - mp_.min_occupancy_log_) / (mp_.fading_time_ * 2); // function called at 2Hz
   const double low_thres = mp_.clamp_min_log_ + reduce;
 
   ros::Time t0 = ros::Time::now();
+  // 遍历所有网格，衰减占据概率
   for (size_t i = 0; i < md_.occupancy_buffer_.size(); ++i)
   {
     if (md_.occupancy_buffer_[i] > low_thres)
     {
       bool obs_flag = md_.occupancy_buffer_[i] >= mp_.min_occupancy_log_;
       md_.occupancy_buffer_[i] -= reduce;
+      // 如果障碍物状态因衰减而改变，更新膨胀缓冲区
       if (obs_flag && md_.occupancy_buffer_[i] < mp_.min_occupancy_log_)
       {
         Eigen::Vector3i idx = BufIdx2GlobalIdx(i);
@@ -222,26 +240,27 @@ void GridMap::fadingCallback(const ros::TimerEvent & /*event*/)
     }
   }
   ros::Time t1 = ros::Time::now();
-
+  // 显示衰减处理耗时
   if (mp_.show_occ_time_)
   {
     printf("Fading(ms):%f\n", (t1 - t0).toSec() * 1000);
   }
 }
-
+// 深度图像和姿态消息回调函数
 void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
                                 const geometry_msgs::PoseStampedConstPtr &pose)
 {
   /* get depth image */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
-
+  // 如果是浮点型深度图像，转换为整型
   if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1)
   {
     (cv_ptr->image).convertTo(cv_ptr->image, CV_16UC1, mp_.k_depth_scaling_factor_);
   }
+  // 保存深度图像
   cv_ptr->image.copyTo(md_.depth_image_);
-
+  // 初始化投影点容器（仅首次调用）
   static bool first_flag = true;
   if (first_flag)
   {
@@ -252,22 +271,24 @@ void GridMap::depthPoseCallback(const sensor_msgs::ImageConstPtr &img,
   // std::cout << "depth: " << md_.depth_image_.cols << ", " << md_.depth_image_.rows << std::endl;
 
   /* get pose */
+  // 处理相机姿态
   md_.camera_pos_(0) = pose->pose.position.x;
   md_.camera_pos_(1) = pose->pose.position.y;
   md_.camera_pos_(2) = pose->pose.position.z;
+  // 将四元数转换为旋转矩阵
   md_.camera_r_m_ = Eigen::Quaterniond(pose->pose.orientation.w, pose->pose.orientation.x,
                                        pose->pose.orientation.y, pose->pose.orientation.z)
                         .toRotationMatrix();
-
+  // 标记地图需要更新
   md_.occ_need_update_ = true;
   md_.flag_have_ever_received_depth_ = true;
 }
-
+// 深度图像和里程计消息回调函数
 void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
                                 const nav_msgs::OdometryConstPtr &odom)
 {
 
-  /* get pose */
+  /* 从里程计消息中提取相机姿态 */
   Eigen::Quaterniond body_q = Eigen::Quaterniond(odom->pose.pose.orientation.w,
                                                  odom->pose.pose.orientation.x,
                                                  odom->pose.pose.orientation.y,
@@ -279,14 +300,14 @@ void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
   body2world(1, 3) = odom->pose.pose.position.y;
   body2world(2, 3) = odom->pose.pose.position.z;
   body2world(3, 3) = 1.0;
-
+  // 计算相机到世界坐标系的变换
   Eigen::Matrix4d cam_T = body2world * md_.cam2body_;
   md_.camera_pos_(0) = cam_T(0, 3);
   md_.camera_pos_(1) = cam_T(1, 3);
   md_.camera_pos_(2) = cam_T(2, 3);
   md_.camera_r_m_ = cam_T.block<3, 3>(0, 0);
 
-  /* get depth image */
+  /* 处理深度图像(与depthPoseCallback类似) */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
   if (img->encoding == sensor_msgs::image_encodings::TYPE_32FC1)
@@ -294,27 +315,28 @@ void GridMap::depthOdomCallback(const sensor_msgs::ImageConstPtr &img,
     (cv_ptr->image).convertTo(cv_ptr->image, CV_16UC1, mp_.k_depth_scaling_factor_);
   }
   cv_ptr->image.copyTo(md_.depth_image_);
-
+  // 初始化投影点容器(仅首次调用)
   static bool first_flag = true;
   if (first_flag)
   {
     first_flag = false;
     md_.proj_points_.resize(md_.depth_image_.cols * md_.depth_image_.rows / mp_.skip_pixel_ / mp_.skip_pixel_);
   }
-
+  // 标记地图需要更新
   md_.occ_need_update_ = true;
   md_.flag_have_ever_received_depth_ = true;
 }
-
+// 独立里程计回调函数
 void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
 {
+  // 如果已接收到深度数据，关闭此订阅
   if (md_.flag_have_ever_received_depth_)
   {
     indep_odom_sub_.shutdown();
     return;
   }
 
-  /* get pose */
+  /* 从里程计消息中提取相机姿态 */
   Eigen::Quaterniond body_q = Eigen::Quaterniond(odom->pose.pose.orientation.w,
                                                  odom->pose.pose.orientation.x,
                                                  odom->pose.pose.orientation.y,
@@ -326,54 +348,57 @@ void GridMap::odomCallback(const nav_msgs::OdometryConstPtr &odom)
   body2world(1, 3) = odom->pose.pose.position.y;
   body2world(2, 3) = odom->pose.pose.position.z;
   body2world(3, 3) = 1.0;
-
+  // 计算相机到世界坐标系的变换
   Eigen::Matrix4d cam_T = body2world * md_.cam2body_;
   md_.camera_pos_(0) = cam_T(0, 3);
   md_.camera_pos_(1) = cam_T(1, 3);
   md_.camera_pos_(2) = cam_T(2, 3);
   md_.camera_r_m_ = cam_T.block<3, 3>(0, 0);
-
+  // 标记已接收到里程计数据
   md_.has_odom_ = true;
 }
-
+// 点云数据回调函数
 void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
 {
   /* Note: no obstalce elimination in this function! */
-
+  // 如果没有里程计数据，无法处理点云
   if (!md_.has_odom_)
   {
     std::cout << "grid_map: no odom!" << std::endl;
     return;
   }
-
+  // 转换ROS点云消息到PCL点云
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
   pcl::fromROSMsg(*img, latest_cloud);
 
   if (latest_cloud.points.size() == 0)
     return;
-
+  // 检查相机位置是否有效
   if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2)))
     return;
-
+  // 移动环形缓冲区
   moveRingBuffer();
-
+  // 处理每个点云点
   pcl::PointXYZ pt;
   Eigen::Vector3d p3d, p3d_inf;
   for (size_t i = 0; i < latest_cloud.points.size(); ++i)
   {
     pt = latest_cloud.points[i];
     p3d(0) = pt.x, p3d(1) = pt.y, p3d(2) = pt.z;
+    // 跳过无效点
     if (p3d.array().isNaN().sum())
       continue;
-
+    // 检查点是否在地图范围内
     if (isInBuf(p3d))
     {
-      /* inflate the point */
+      /* 膨胀点(标记周围网格为障碍物) */
       Eigen::Vector3i idx = pos2GlobalIdx(p3d);
       int buf_id = globalIdx2BufIdx(idx);
       int inf_buf_id = globalIdx2InfBufIdx(idx);
+      // 设置占据概率为最大值
       md_.occupancy_buffer_[buf_id] = mp_.clamp_max_log_;
 
+      // 如果膨胀缓冲区中该点未标记为障碍物且原始缓冲区中该点为障碍物
       if (md_.occupancy_buffer_inflate_[inf_buf_id] < GRID_MAP_OBS_FLAG && md_.occupancy_buffer_[buf_id] >= mp_.min_occupancy_log_)
       {
         changeInfBuf(true, inf_buf_id, idx);
@@ -381,33 +406,38 @@ void GridMap::cloudCallback(const sensor_msgs::PointCloud2ConstPtr &img)
     }
   }
 }
-
+// 外参回调函数(更新相机到本体的变换)
 void GridMap::extrinsicCallback(const nav_msgs::OdometryConstPtr &odom)
 {
+  // 从消息中提取四元数并转换为旋转矩阵
   Eigen::Quaterniond cam2body_q = Eigen::Quaterniond(odom->pose.pose.orientation.w,
                                                      odom->pose.pose.orientation.x,
                                                      odom->pose.pose.orientation.y,
                                                      odom->pose.pose.orientation.z);
   Eigen::Matrix3d cam2body_r_m = cam2body_q.toRotationMatrix();
+  // 更新相机到本体的变换矩阵
   md_.cam2body_.block<3, 3>(0, 0) = cam2body_r_m;
   md_.cam2body_(0, 3) = odom->pose.pose.position.x;
   md_.cam2body_(1, 3) = odom->pose.pose.position.y;
   md_.cam2body_(2, 3) = odom->pose.pose.position.z;
   md_.cam2body_(3, 3) = 1.0;
 }
-
+// 移动环形缓冲区(实现动态窗口)
 void GridMap::moveRingBuffer()
-{
+{ 
+  // 首次调用时初始化地图边界
   if (!mp_.have_initialized_)
     initMapBoundary();
-
+  // 计算当前相机位置的网格索引
   Eigen::Vector3i center_new = pos2GlobalIdx(md_.camera_pos_);
+  // 计算新的更新范围(网格索引)
   Eigen::Vector3i ringbuffer_lowbound3i_new = center_new - mp_.local_update_range3i_;
   Eigen::Vector3d ringbuffer_lowbound3d_new = ringbuffer_lowbound3i_new.cast<double>() * mp_.resolution_;
   Eigen::Vector3i ringbuffer_upbound3i_new = center_new + mp_.local_update_range3i_;
   Eigen::Vector3d ringbuffer_upbound3d_new = ringbuffer_upbound3i_new.cast<double>() * mp_.resolution_;
   ringbuffer_upbound3i_new -= Eigen::Vector3i(1, 1, 1);
 
+  // 计算包含膨胀区域的边界
   const Eigen::Vector3i inf_grid3i(mp_.inf_grid_, mp_.inf_grid_, mp_.inf_grid_);
   const Eigen::Vector3d inf_grid3d = inf_grid3i.array().cast<double>() * mp_.resolution_;
   Eigen::Vector3i ringbuffer_inf_lowbound3i_new = ringbuffer_lowbound3i_new - inf_grid3i;
@@ -415,6 +445,7 @@ void GridMap::moveRingBuffer()
   Eigen::Vector3i ringbuffer_inf_upbound3i_new = ringbuffer_upbound3i_new + inf_grid3i;
   Eigen::Vector3d ringbuffer_inf_upbound3d_new = ringbuffer_upbound3d_new + inf_grid3d;
 
+  // 根据相机移动方向清除旧数据
   if (center_new(0) < md_.center_last3i_(0))
     clearBuffer(0, ringbuffer_upbound3i_new(0));
   if (center_new(0) > md_.center_last3i_(0))
@@ -428,6 +459,7 @@ void GridMap::moveRingBuffer()
   if (center_new(2) > md_.center_last3i_(2))
     clearBuffer(5, ringbuffer_lowbound3i_new(2));
 
+  // 更新环形缓冲区索引
   for (int i = 0; i < 3; ++i)
   {
     while (md_.ringbuffer_origin3i_(i) < md_.ringbuffer_lowbound3i_(i))
@@ -448,7 +480,7 @@ void GridMap::moveRingBuffer()
       md_.ringbuffer_inf_origin3i_(i) -= md_.ringbuffer_inf_size3i_(i);
     }
   }
-
+  // 保存当前中心位置和边界
   md_.center_last3i_ = center_new;
   md_.ringbuffer_lowbound3i_ = ringbuffer_lowbound3i_new;
   md_.ringbuffer_lowbound3d_ = ringbuffer_lowbound3d_new;
@@ -459,7 +491,7 @@ void GridMap::moveRingBuffer()
   md_.ringbuffer_inf_upbound3i_ = ringbuffer_inf_upbound3i_new;
   md_.ringbuffer_inf_upbound3d_ = ringbuffer_inf_upbound3d_new;
 }
-
+// 将深度图像投影到3D空间
 void GridMap::projectDepthImage()
 {
   md_.proj_points_cnt_ = 0;
@@ -573,7 +605,7 @@ void GridMap::projectDepthImage()
   md_.last_camera_r_m_ = md_.camera_r_m_;
   md_.last_depth_image_ = md_.depth_image_;
 }
-
+// 射线投射处理(核心建图算法)
 void GridMap::raycastProcess()
 {
   md_.cache_voxel_cnt_ = 0;
@@ -587,15 +619,17 @@ void GridMap::raycastProcess()
 
   int pts_num = 0;
   t1 = ros::Time::now();
+  // 对每个投影点执行射线投射
   for (int i = 0; i < md_.proj_points_cnt_; ++i)
   {
     int vox_idx;
     pt_w = md_.proj_points_[i];
 
     // set flag for projected point
-
+    // 设置投影点的占据状态
     if (!isInBuf(pt_w))
     {
+      // 如果点不在地图范围内，找到地图边界上的最近点
       pt_w = closetPointInMap(pt_w, md_.camera_pos_);
       pts_num++;
       vox_idx = setCacheOccupancy(pt_w, 0);
@@ -607,7 +641,7 @@ void GridMap::raycastProcess()
     }
 
     // raycasting between camera center and point
-
+    // 如果点在缓存中，执行射线投射
     if (vox_idx != INVALID_IDX)
     {
       if (md_.flag_rayend_[vox_idx] == md_.raycast_num_)
@@ -619,9 +653,9 @@ void GridMap::raycastProcess()
         md_.flag_rayend_[vox_idx] = md_.raycast_num_;
       }
     }
-
+    // 初始化射线投射器(相机到点的射线)
     raycaster.setInput(pt_w / mp_.resolution_, md_.camera_pos_ / mp_.resolution_);
-
+    // 遍历射线上的每个网格
     while (raycaster.step(ray_pt))
     {
       Eigen::Vector3d tmp = (ray_pt + Eigen::Vector3d(0.5, 0.5, 0.5)) * mp_.resolution_;
@@ -644,17 +678,17 @@ void GridMap::raycastProcess()
   }
 
   t2 = ros::Time::now();
-
+  // 更新占据概率
   for (int i = 0; i < md_.cache_voxel_cnt_; ++i)
   {
 
     int idx_ctns = globalIdx2BufIdx(md_.cache_voxel_[i]);
-
+    // 根据命中次数计算占据概率更新值
     double log_odds_update =
         md_.count_hit_[idx_ctns] >= md_.count_hit_and_miss_[idx_ctns] - md_.count_hit_[idx_ctns] ? mp_.prob_hit_log_ : mp_.prob_miss_log_;
-
+    // 重置计数器
     md_.count_hit_[idx_ctns] = md_.count_hit_and_miss_[idx_ctns] = 0;
-
+    // 确保概率在有效范围内
     if (log_odds_update >= 0 && md_.occupancy_buffer_[idx_ctns] >= mp_.clamp_max_log_)
     {
       continue;
@@ -663,52 +697,53 @@ void GridMap::raycastProcess()
     {
       continue;
     }
-
+    // 更新占据概率(带上下限约束)
     md_.occupancy_buffer_[idx_ctns] =
         std::min(std::max(md_.occupancy_buffer_[idx_ctns] + log_odds_update, mp_.clamp_min_log_),
                  mp_.clamp_max_log_);
   }
 
   t3 = ros::Time::now();
-
+  // 显示射线投射性能统计
   if (mp_.show_occ_time_)
   {
     ROS_WARN("Raycast time: t2-t1=%f, t3-t2=%f, pts_num=%d", (t2 - t1).toSec(), (t3 - t2).toSec(), pts_num);
   }
 }
-
+// 清除旧数据并膨胀障碍物
 void GridMap::clearAndInflateLocalMap()
 {
+  // 遍历所有缓存的体素
   for (int i = 0; i < md_.cache_voxel_cnt_; ++i)
   {
     Eigen::Vector3i idx = md_.cache_voxel_[i];
     int buf_id = globalIdx2BufIdx(idx);
     int inf_buf_id = globalIdx2InfBufIdx(idx);
-
+    // 如果该点是障碍物且膨胀缓冲区未标记，则更新膨胀缓冲区
     if (md_.occupancy_buffer_inflate_[inf_buf_id] < GRID_MAP_OBS_FLAG && md_.occupancy_buffer_[buf_id] >= mp_.min_occupancy_log_)
     {
       changeInfBuf(true, inf_buf_id, idx);
     }
-
+    // 如果该点不再是障碍物且膨胀缓冲区已标记，则清除膨胀标记
     if (md_.occupancy_buffer_inflate_[inf_buf_id] >= GRID_MAP_OBS_FLAG && md_.occupancy_buffer_[buf_id] < mp_.min_occupancy_log_)
     {
       changeInfBuf(false, inf_buf_id, idx);
     }
   }
 }
-
+// 初始化地图边界(首次调用)
 void GridMap::initMapBoundary()
 {
   mp_.have_initialized_ = true;
-
+  // 计算初始相机位置的网格索引
   md_.center_last3i_ = pos2GlobalIdx(md_.camera_pos_);
-
+  // 计算初始更新范围
   md_.ringbuffer_lowbound3i_ = md_.center_last3i_ - mp_.local_update_range3i_;
   md_.ringbuffer_lowbound3d_ = md_.ringbuffer_lowbound3i_.cast<double>() * mp_.resolution_;
   md_.ringbuffer_upbound3i_ = md_.center_last3i_ + mp_.local_update_range3i_;
   md_.ringbuffer_upbound3d_ = md_.ringbuffer_upbound3i_.cast<double>() * mp_.resolution_;
   md_.ringbuffer_upbound3i_ -= Eigen::Vector3i(1, 1, 1);
-
+  // 计算包含膨胀区域的边界
   const Eigen::Vector3i inf_grid3i(mp_.inf_grid_, mp_.inf_grid_, mp_.inf_grid_);
   const Eigen::Vector3d inf_grid3d = inf_grid3i.array().cast<double>() * mp_.resolution_;
   md_.ringbuffer_inf_lowbound3i_ = md_.ringbuffer_lowbound3i_ - inf_grid3i;
@@ -717,7 +752,7 @@ void GridMap::initMapBoundary()
   md_.ringbuffer_inf_upbound3d_ = md_.ringbuffer_upbound3d_ + inf_grid3d;
 
   // cout << "md_.ringbuffer_lowbound3i_=" << md_.ringbuffer_lowbound3i_.transpose() << " md_.ringbuffer_lowbound3d_=" << md_.ringbuffer_lowbound3d_.transpose() << " md_.ringbuffer_upbound3i_=" << md_.ringbuffer_upbound3i_.transpose() << " md_.ringbuffer_upbound3d_=" << md_.ringbuffer_upbound3d_.transpose() << endl;
-
+  // 初始化环形缓冲区索引
   for (int i = 0; i < 3; ++i)
   {
     while (md_.ringbuffer_origin3i_(i) < md_.ringbuffer_lowbound3i_(i))
@@ -743,9 +778,10 @@ void GridMap::initMapBoundary()
   testIndexingCost();
 #endif
 }
-
+// 清除缓冲区旧数据
 void GridMap::clearBuffer(char casein, int bound)
 {
+  // 根据相机移动方向清除对应区域的数据
   for (int x = (casein == 0 ? bound : md_.ringbuffer_lowbound3i_(0)); x <= (casein == 1 ? bound : md_.ringbuffer_upbound3i_(0)); ++x)
     for (int y = (casein == 2 ? bound : md_.ringbuffer_lowbound3i_(1)); y <= (casein == 3 ? bound : md_.ringbuffer_upbound3i_(1)); ++y)
       for (int z = (casein == 4 ? bound : md_.ringbuffer_lowbound3i_(2)); z <= (casein == 5 ? bound : md_.ringbuffer_upbound3i_(2)); ++z)
@@ -759,12 +795,13 @@ void GridMap::clearBuffer(char casein, int bound)
         // int id_buf_inf_clr = globalIdx2InfBufIdx(id_global_inf_clr);
 
         // md_.occupancy_buffer_inflate_[id_buf_inf_clr] = 0;
+        // 重置缓冲区状态
         md_.count_hit_[id_buf] = 0;
         md_.count_hit_and_miss_[id_buf] = 0;
         md_.flag_traverse_[id_buf] = md_.raycast_num_;
         md_.flag_rayend_[id_buf] = md_.raycast_num_;
         md_.occupancy_buffer_[id_buf] = mp_.clamp_min_log_;
-
+        // 如果膨胀缓冲区中该点为障碍物，清除标记
         if (md_.occupancy_buffer_inflate_[id_buf_inf] > GRID_MAP_OBS_FLAG)
         {
           changeInfBuf(false, id_buf_inf, id_global);
@@ -787,15 +824,17 @@ void GridMap::clearBuffer(char casein, int bound)
       }
 #endif
 }
-
+// 计算点在地图上的最近点(用于处理地图外的点)
 Eigen::Vector3d GridMap::closetPointInMap(const Eigen::Vector3d &pt, const Eigen::Vector3d &camera_pt)
 {
+  // 计算点到相机的向量
   Eigen::Vector3d diff = pt - camera_pt;
+  // 计算地图边界到相机的向量
   Eigen::Vector3d max_tc = md_.ringbuffer_upbound3d_ - camera_pt;
   Eigen::Vector3d min_tc = md_.ringbuffer_lowbound3d_ - camera_pt;
 
   double min_t = 1000000;
-
+  // 计算射线与地图边界的交点
   for (int i = 0; i < 3; ++i)
   {
     if (fabs(diff[i]) > 0)
@@ -810,16 +849,17 @@ Eigen::Vector3d GridMap::closetPointInMap(const Eigen::Vector3d &pt, const Eigen
         min_t = t2;
     }
   }
-
+  // 返回地图边界上的最近点
   return camera_pt + (min_t - 1e-3) * diff;
 }
-
+// 检查是否需要更新地图(数据有效性检查)
 bool GridMap::checkDepthOdomNeedupdate()
-{
+{ // 初始化最后更新时间
   if (md_.last_occ_update_time_.toSec() < 1.0)
   {
     md_.last_occ_update_time_ = ros::Time::now();
   }
+  // 如果不需要更新且数据超时，标记错误
   if (!md_.occ_need_update_)
   {
     if (md_.flag_have_ever_received_depth_ && (ros::Time::now() - md_.last_occ_update_time_).toSec() > mp_.odom_depth_timeout_)
@@ -830,34 +870,43 @@ bool GridMap::checkDepthOdomNeedupdate()
     }
     return false;
   }
+  // 更新最后更新时间
   md_.last_occ_update_time_ = ros::Time::now();
 
   return true;
 }
-
+// 发布原始占据地图
 void GridMap::publishMap()
 {
-
+  // 如果没有订阅者，不发布
   if (map_pub_.getNumSubscribers() <= 0)
     return;
-
+  // 计算相机朝向
   Eigen::Vector3d heading = (md_.camera_r_m_ * md_.cam2body_.block<3, 3>(0, 0).transpose()).block<3, 1>(0, 0);
   pcl::PointCloud<pcl::PointXYZ> cloud;
+  // 考虑虚拟墙时的高度限制
   double lbz = mp_.enable_virtual_walll_ ? max(md_.ringbuffer_lowbound3d_(2), mp_.virtual_ground_) : md_.ringbuffer_lowbound3d_(2);
   double ubz = mp_.enable_virtual_walll_ ? min(md_.ringbuffer_upbound3d_(2), mp_.virtual_ceil_) : md_.ringbuffer_upbound3d_(2);
+  // 遍历地图范围内的所有网格，收集障碍物点
   if (md_.ringbuffer_upbound3d_(0) - md_.ringbuffer_lowbound3d_(0) > mp_.resolution_ && (md_.ringbuffer_upbound3d_(1) - md_.ringbuffer_lowbound3d_(1)) > mp_.resolution_ && (ubz - lbz) > mp_.resolution_)
     for (double xd = md_.ringbuffer_lowbound3d_(0) + mp_.resolution_ / 2; xd <= md_.ringbuffer_upbound3d_(0); xd += mp_.resolution_)
       for (double yd = md_.ringbuffer_lowbound3d_(1) + mp_.resolution_ / 2; yd <= md_.ringbuffer_upbound3d_(1); yd += mp_.resolution_)
         for (double zd = lbz + mp_.resolution_ / 2; zd <= ubz; zd += mp_.resolution_)
         {
           Eigen::Vector3d relative_dir = (Eigen::Vector3d(xd, yd, zd) - md_.camera_pos_);
-          if (heading.dot(relative_dir.normalized()) > 0.5)
-          {
-            if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
-              cloud.push_back(pcl::PointXYZ(xd, yd, zd));
-          }
-        }
 
+          // 只发布相机前方的障碍物
+          // if (heading.dot(relative_dir.normalized()) > 0.5)
+          // {
+          //   if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
+          //     cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+          // }
+          
+          // 替换成发布整个局部地图的障碍物 =======LH 20250626
+          if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
+            cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+        }
+  // 准备ROS点云消息
   cloud.width = cloud.points.size();
   cloud.height = 1;
   cloud.is_dense = true;
@@ -867,17 +916,19 @@ void GridMap::publishMap()
   pcl::toROSMsg(cloud, cloud_msg);
   map_pub_.publish(cloud_msg);
 }
-
+// 发布膨胀后的占据地图
 void GridMap::publishMapInflate()
 {
-
+  // 如果没有订阅者，不发布
   if (map_inf_pub_.getNumSubscribers() <= 0)
     return;
-
+  // 计算相机朝向
   Eigen::Vector3d heading = (md_.camera_r_m_ * md_.cam2body_.block<3, 3>(0, 0).transpose()).block<3, 1>(0, 0);
   pcl::PointCloud<pcl::PointXYZ> cloud;
+  // 考虑虚拟墙时的高度限制(包含膨胀区域)
   double lbz = mp_.enable_virtual_walll_ ? max(md_.ringbuffer_inf_lowbound3d_(2), mp_.virtual_ground_) : md_.ringbuffer_inf_lowbound3d_(2);
   double ubz = mp_.enable_virtual_walll_ ? min(md_.ringbuffer_inf_upbound3d_(2), mp_.virtual_ceil_) : md_.ringbuffer_inf_upbound3d_(2);
+  // 遍历膨胀后的地图范围，收集障碍物点
   if (md_.ringbuffer_inf_upbound3d_(0) - md_.ringbuffer_inf_lowbound3d_(0) > mp_.resolution_ &&
       (md_.ringbuffer_inf_upbound3d_(1) - md_.ringbuffer_inf_lowbound3d_(1)) > mp_.resolution_ && (ubz - lbz) > mp_.resolution_)
     for (double xd = md_.ringbuffer_inf_lowbound3d_(0) + mp_.resolution_ / 2; xd < md_.ringbuffer_inf_upbound3d_(0); xd += mp_.resolution_)
@@ -885,13 +936,19 @@ void GridMap::publishMapInflate()
         for (double zd = lbz + mp_.resolution_ / 2; zd < ubz; zd += mp_.resolution_)
         {
           Eigen::Vector3d relative_dir = (Eigen::Vector3d(xd, yd, zd) - md_.camera_pos_);
-          if (heading.dot(relative_dir.normalized()) > 0.5)
-          {
-            if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
-              cloud.push_back(pcl::PointXYZ(xd, yd, zd));
-          }
-        }
 
+          // 只发布相机前方的障碍物
+          // if (heading.dot(relative_dir.normalized()) > 0.5)
+          // {
+          //   if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
+          //     cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+          // }
+
+          // 替换成发布整个局部地图的障碍物 =======LH 20250626
+          if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
+            cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+        }
+  // 准备ROS点云消息
   cloud.width = cloud.points.size();
   cloud.height = 1;
   cloud.is_dense = true;
@@ -901,7 +958,7 @@ void GridMap::publishMapInflate()
   pcl::toROSMsg(cloud, cloud_msg);
   map_inf_pub_.publish(cloud_msg);
 }
-
+// 性能测试函数(索引计算耗时)
 void GridMap::testIndexingCost()
 {
   if (!mp_.have_initialized_)
