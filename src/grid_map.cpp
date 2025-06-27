@@ -7,8 +7,8 @@ void GridMap::initMap(ros::NodeHandle &nh)
   /* get parameter */
   // double x_size, y_size, z_size;
   node_.param("grid_map/pose_type", mp_.pose_type_, 1); // 姿态类型
-  node_.param("grid_map/frame_id", mp_.frame_id_, string("world")); // 地图坐标系
-  node_.param("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_, 1.0); // 数据超时时间
+  node_.param("grid_map/frame_id", mp_.frame_id_, string("world")); // 地图坐标系 只有在发布占据地图的时候起作用
+  node_.param("grid_map/odom_depth_timeout", mp_.odom_depth_timeout_, 1.0); // 数据超时时间，深度图和里程计没有数据超时
 
   node_.param("grid_map/resolution", mp_.resolution_, -1.0); // 网格分辨率
   // 局部更新范围
@@ -56,9 +56,11 @@ void GridMap::initMap(ros::NodeHandle &nh)
   // 将3D更新范围从米转换为网格数
   mp_.local_update_range3i_ = (mp_.local_update_range3d_ * mp_.resolution_inv_).array().ceil().cast<int>();
   mp_.local_update_range3d_ = mp_.local_update_range3i_.array().cast<double>() * mp_.resolution_;
+  cout << "mp_.local_update_range3d_: " << mp_.local_update_range3d_ << endl;
   // 环形缓冲区大小（包含膨胀区域）
   md_.ringbuffer_size3i_ = 2 * mp_.local_update_range3i_;
   md_.ringbuffer_inf_size3i_ = md_.ringbuffer_size3i_ + Eigen::Vector3i(2 * mp_.inf_grid_, 2 * mp_.inf_grid_, 2 * mp_.inf_grid_);
+
 
   // 计算概率的对数表示（Log-odds变换）
   mp_.prob_hit_log_ = logit(mp_.p_hit_);
@@ -109,6 +111,7 @@ void GridMap::initMap(ros::NodeHandle &nh)
   // 根据姿态类型选择不同的订阅方式
   if (mp_.pose_type_ == POSE_STAMPED)
   {
+    // 包含带时间戳的 3D 位姿信息（位置 + 姿态）
     pose_sub_.reset(
         new message_filters::Subscriber<geometry_msgs::PoseStamped>(node_, "grid_map/pose", 25));
     // 同步深度图像和姿态消息
@@ -889,23 +892,38 @@ void GridMap::publishMap()
   double ubz = mp_.enable_virtual_walll_ ? min(md_.ringbuffer_upbound3d_(2), mp_.virtual_ceil_) : md_.ringbuffer_upbound3d_(2);
   // 遍历地图范围内的所有网格，收集障碍物点
   if (md_.ringbuffer_upbound3d_(0) - md_.ringbuffer_lowbound3d_(0) > mp_.resolution_ && (md_.ringbuffer_upbound3d_(1) - md_.ringbuffer_lowbound3d_(1)) > mp_.resolution_ && (ubz - lbz) > mp_.resolution_)
-    for (double xd = md_.ringbuffer_lowbound3d_(0) + mp_.resolution_ / 2; xd <= md_.ringbuffer_upbound3d_(0); xd += mp_.resolution_)
-      for (double yd = md_.ringbuffer_lowbound3d_(1) + mp_.resolution_ / 2; yd <= md_.ringbuffer_upbound3d_(1); yd += mp_.resolution_)
-        for (double zd = lbz + mp_.resolution_ / 2; zd <= ubz; zd += mp_.resolution_)
-        {
-          Eigen::Vector3d relative_dir = (Eigen::Vector3d(xd, yd, zd) - md_.camera_pos_);
+  { for (double xd = md_.ringbuffer_lowbound3d_(0) + mp_.resolution_ / 2; xd <= md_.ringbuffer_upbound3d_(0); xd += mp_.resolution_)
+      { for (double yd = md_.ringbuffer_lowbound3d_(1) + mp_.resolution_ / 2; yd <= md_.ringbuffer_upbound3d_(1); yd += mp_.resolution_)
+          {  for (double zd = lbz + mp_.resolution_ / 2; zd <= ubz; zd += mp_.resolution_)
+                {
+                  Eigen::Vector3d relative_dir = (Eigen::Vector3d(xd, yd, zd) - md_.camera_pos_);
 
-          // 只发布相机前方的障碍物
-          // if (heading.dot(relative_dir.normalized()) > 0.5)
-          // {
-          //   if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
-          //     cloud.push_back(pcl::PointXYZ(xd, yd, zd));
-          // }
-          
-          // 替换成发布整个局部地图的障碍物 =======LH 20250626
-          if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
-            cloud.push_back(pcl::PointXYZ(xd, yd, zd));
-        }
+                  // 只发布相机前方的障碍物
+                  // if (heading.dot(relative_dir.normalized()) > 0.5)
+                  // {
+                  //   if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
+                  //     cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+                  // }
+                  
+                  // 替换成发布整个局部地图的障碍物 =======LH 20250626
+                  if (md_.occupancy_buffer_[globalIdx2BufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))] >= mp_.min_occupancy_log_)
+                    cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+                }
+            // 将虚拟天花板和虚拟地面也显示为障碍物 LH 20250627
+            // 添加虚拟天花板（如果启用了虚拟墙）
+            if (mp_.enable_virtual_walll_ && mp_.virtual_ceil_ < md_.ringbuffer_upbound3d_(2))
+            {
+              cloud.push_back(pcl::PointXYZ(xd, yd, mp_.virtual_ceil_));
+            }
+            
+            // 添加虚拟地面（如果启用了虚拟墙）
+            if (mp_.enable_virtual_walll_ && mp_.virtual_ground_ > md_.ringbuffer_lowbound3d_(2))
+            {
+              cloud.push_back(pcl::PointXYZ(xd, yd, mp_.virtual_ground_));
+            }
+          }
+      }
+  }
   // 准备ROS点云消息
   cloud.width = cloud.points.size();
   cloud.height = 1;
@@ -931,23 +949,38 @@ void GridMap::publishMapInflate()
   // 遍历膨胀后的地图范围，收集障碍物点
   if (md_.ringbuffer_inf_upbound3d_(0) - md_.ringbuffer_inf_lowbound3d_(0) > mp_.resolution_ &&
       (md_.ringbuffer_inf_upbound3d_(1) - md_.ringbuffer_inf_lowbound3d_(1)) > mp_.resolution_ && (ubz - lbz) > mp_.resolution_)
-    for (double xd = md_.ringbuffer_inf_lowbound3d_(0) + mp_.resolution_ / 2; xd < md_.ringbuffer_inf_upbound3d_(0); xd += mp_.resolution_)
-      for (double yd = md_.ringbuffer_inf_lowbound3d_(1) + mp_.resolution_ / 2; yd < md_.ringbuffer_inf_upbound3d_(1); yd += mp_.resolution_)
-        for (double zd = lbz + mp_.resolution_ / 2; zd < ubz; zd += mp_.resolution_)
-        {
-          Eigen::Vector3d relative_dir = (Eigen::Vector3d(xd, yd, zd) - md_.camera_pos_);
+  {  for (double xd = md_.ringbuffer_inf_lowbound3d_(0) + mp_.resolution_ / 2; xd < md_.ringbuffer_inf_upbound3d_(0); xd += mp_.resolution_)
+      {  for (double yd = md_.ringbuffer_inf_lowbound3d_(1) + mp_.resolution_ / 2; yd < md_.ringbuffer_inf_upbound3d_(1); yd += mp_.resolution_)
+          {  for (double zd = lbz + mp_.resolution_ / 2; zd < ubz; zd += mp_.resolution_)
+              {
+                Eigen::Vector3d relative_dir = (Eigen::Vector3d(xd, yd, zd) - md_.camera_pos_);
 
-          // 只发布相机前方的障碍物
-          // if (heading.dot(relative_dir.normalized()) > 0.5)
-          // {
-          //   if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
-          //     cloud.push_back(pcl::PointXYZ(xd, yd, zd));
-          // }
+                // 只发布相机前方的障碍物
+                // if (heading.dot(relative_dir.normalized()) > 0.5)
+                // {
+                //   if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
+                //     cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+                // }
 
-          // 替换成发布整个局部地图的障碍物 =======LH 20250626
-          if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
-            cloud.push_back(pcl::PointXYZ(xd, yd, zd));
-        }
+                // 替换成发布整个局部地图的障碍物 =======LH 20250626
+                if (md_.occupancy_buffer_inflate_[globalIdx2InfBufIdx(pos2GlobalIdx(Eigen::Vector3d(xd, yd, zd)))])
+                  cloud.push_back(pcl::PointXYZ(xd, yd, zd));
+              }
+            // 将虚拟天花板和虚拟地面也显示为障碍物 LH 20250627
+            // 添加虚拟天花板（如果启用了虚拟墙）
+            if (mp_.enable_virtual_walll_ && mp_.virtual_ceil_ < md_.ringbuffer_upbound3d_(2))
+            {
+              cloud.push_back(pcl::PointXYZ(xd, yd, mp_.virtual_ceil_));
+            }
+            
+            // 添加虚拟地面（如果启用了虚拟墙）
+            if (mp_.enable_virtual_walll_ && mp_.virtual_ground_ > md_.ringbuffer_lowbound3d_(2))
+            {
+              cloud.push_back(pcl::PointXYZ(xd, yd, mp_.virtual_ground_));
+            }
+          }
+      }
+  }
   // 准备ROS点云消息
   cloud.width = cloud.points.size();
   cloud.height = 1;

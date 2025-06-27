@@ -2,16 +2,17 @@
 
 <node pkg="plan_env" name="gridmap_node" type="gridmap_node" output="screen">
     <param name="grid_map/resolution"      value="0.1" /> 
-    <param name="grid_map/map_size_x"   value="400" /> 
-    <param name="grid_map/map_size_y"   value="400" /> 
-    <param name="grid_map/map_size_z"   value="10" /> 
 
-    <param name="grid_map/local_update_range_x"  value="10" /> 
-    <param name="grid_map/local_update_range_y"  value="10" /> 
-    <param name="grid_map/local_update_range_z"  value="10" /> 
+    <param name="grid_map/local_update_range_x"  value="10.15" /> 
+    <param name="grid_map/local_update_range_y"  value="10.15" /> 
+    <param name="grid_map/local_update_range_z"  value="10.15" /> 
     <param name="grid_map/obstacles_inflation"     value="0.1" /> 
-    <param name="grid_map/local_map_margin" value="10"/>
-    <param name="grid_map/ground_height"        value="-0.01"/>
+    <!-- 虚拟地面高度 -->
+    <param name="grid_map/virtual_ground"        value="0"/>
+    <!-- 是否启动虚拟墙 -->
+    <param name="grid_map/enable_virtual_wall"        value="false"/>
+    <!-- 该参数控制RViz 中显示的地图高度上限，用于简化可视化：高于此高度的栅格点不会被加入可视化点云。-->
+    <param name="grid_map/virtual_ceil"   value="5"/> 
     <!-- camera parameter -->
 
     <param name="grid_map/cx" value="320.2084655761719"/>
@@ -33,10 +34,10 @@
     <param name="grid_map/p_min"  value="0.12"/>
     <param name="grid_map/p_max"  value="0.90"/>
     <param name="grid_map/p_occ"  value="0.80"/>
-    <param name="grid_map/min_ray_length" value="0.1"/>
-    <param name="grid_map/max_ray_length" value="20.0"/>
+    <!-- 忽略距离相机过近的点（如相机本身的支架或噪声点） -->
+    <param name="grid_map/min_ray_length" value="0.2"/> 
 
-    <param name="grid_map/visualization_truncate_height"   value="1.8"/>
+
     <param name="grid_map/show_occ_time"  value="false"/>
     <param name="grid_map/pose_type"     value="2"/>  
     <param name="grid_map/frame_id"      value="world"/>

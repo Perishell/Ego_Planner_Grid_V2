@@ -79,7 +79,7 @@ Visualization Manager:
       Queue Size: 10
       Selectable: true
       Size (Pixels): 3
-      Size (m): 0.20000000298023224
+      Size (m): 0.10000000149011612
       Style: Boxes
       Topic: /gridmap_node/grid_map/occupancy_inflate
       Unreliable: false
@@ -168,7 +168,7 @@ Visualization Manager:
       Unreliable: false
       Value: true
     - Class: rviz/Image
-      Enabled: false
+      Enabled: true
       Image Topic: /vins_estimator/image_track
       Max Value: 1
       Median window: 5
@@ -178,9 +178,9 @@ Visualization Manager:
       Queue Size: 2
       Transport Hint: raw
       Unreliable: false
-      Value: false
+      Value: true
     - Class: rviz/Image
-      Enabled: true
+      Enabled: false
       Image Topic: /zed2/zed_node/depth/depth_registered
       Max Value: 1
       Median window: 5
@@ -190,10 +190,10 @@ Visualization Manager:
       Queue Size: 2
       Transport Hint: raw
       Unreliable: false
-      Value: true
+      Value: false
   Enabled: true
   Global Options:
-    Background Color: 48; 48; 48
+    Background Color: 85; 87; 83
     Default Light: true
     Fixed Frame: world
     Frame Rate: 30
@@ -219,7 +219,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 50.940582275390625
+      Distance: 71.5678482055664
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -227,9 +227,9 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: 12.921485900878906
-        Y: -2.1304075717926025
-        Z: -9.448339462280273
+        X: 0.5113251209259033
+        Y: -10.496461868286133
+        Z: -4.7355546951293945
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
